@@ -147,30 +147,40 @@ app.delete('/admin-data-purge', async (req, res) => {
  // Jodi axios install na thake, 'npm install axios' korun ba 'fetch' use korun
 
 // index.js er /api/masjids route-ti ebhabe update korun
-// index.js (Backend)
 app.get('/api/masjids', async (req, res) => {
     try {
         const { lat, lng } = req.query;
-        
-        if (!lat || !lng) {
-            return res.status(400).json({ error: "Missing coordinates" });
-        }
+        if (!lat || !lng) return res.status(400).json({ error: "Missing coordinates" });
 
-        // Overpass Query
         const query = `[out:json];node["amenity"="place_of_worship"]["religion"="muslim"](around:3000, ${lat}, ${lng});out;`;
         const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
-        // AXIOS use korun (fetch-er bodole)
-        const response = await axios.get(url);
-        
-        // Axios response directly JSON data provide kore
-        res.status(200).json(response.data);
-        
+        console.log(`[SYSTEM] Fetching nodes for Lat: ${lat}, Lng: ${lng}`);
+
+        // Axios with proper headers
+        const response = await axios.get(url, {
+            headers: {
+                'User-Agent': 'FindSheikhBiriyani/1.0',
+                'Accept': 'application/json'
+            },
+            timeout: 8000 // 8 seconds timeout for Vercel
+        });
+
+        // Response check
+        if (response.data) {
+            res.status(200).json(response.data);
+        } else {
+            throw new Error("Empty data received from Overpass");
+        }
+
     } catch (error) {
-        console.error("Overpass Error:", error.message);
-        res.status(500).json({ 
+        console.error("CRITICAL_OVERPASS_ERROR:", error.message);
+        
+        // Detailed error response
+        const status = error.response ? error.response.status : 500;
+        res.status(status).json({ 
             error: "Failed to fetch map data", 
-            details: error.message 
+            message: error.message 
         });
     }
 });
