@@ -92,6 +92,24 @@ async function run() {
       }
     });
 
+    // index.js file-e onno route-er niche eta add korun
+app.get('/api/masjids', async (req, res) => {
+    try {
+        const { lat, lng } = req.query;
+        const query = `[out:json];node["amenity"="place_of_worship"]["religion"="muslim"](around:3000, ${lat}, ${lng});out;`;
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        // Server theke data-ti frontend-e pathiye dewa
+        res.json(data);
+    } catch (error) {
+        console.error("Overpass Fetch Error:", error);
+        res.status(500).json({ success: false, message: "Failed to fetch map data" });
+    }
+});
+
     /**
      * 3. Delete Log API
      */
