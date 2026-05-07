@@ -147,21 +147,31 @@ app.delete('/admin-data-purge', async (req, res) => {
  // Jodi axios install na thake, 'npm install axios' korun ba 'fetch' use korun
 
 // index.js er /api/masjids route-ti ebhabe update korun
+// index.js (Backend)
 app.get('/api/masjids', async (req, res) => {
     try {
         const { lat, lng } = req.query;
-        if (!lat || !lng) return res.status(400).json({ error: "Missing coordinates" });
+        
+        if (!lat || !lng) {
+            return res.status(400).json({ error: "Missing coordinates" });
+        }
 
+        // Overpass Query
         const query = `[out:json];node["amenity"="place_of_worship"]["religion"="muslim"](around:3000, ${lat}, ${lng});out;`;
         const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`;
 
-        // fetch er bodole axios use kora hoyeche
+        // AXIOS use korun (fetch-er bodole)
         const response = await axios.get(url);
         
+        // Axios response directly JSON data provide kore
         res.status(200).json(response.data);
+        
     } catch (error) {
         console.error("Overpass Error:", error.message);
-        res.status(500).json({ error: "Internal Server Error", details: error.message });
+        res.status(500).json({ 
+            error: "Failed to fetch map data", 
+            details: error.message 
+        });
     }
 });
 
